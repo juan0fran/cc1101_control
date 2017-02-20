@@ -12,7 +12,8 @@
 typedef struct spi_parms_s
 {
     int      fd;
-    int      ret; /* Ret value of funcking SPI */
+    int      ret; 	 /* Ret value of funcking SPI */
+    uint8_t  status;
     uint8_t  tx[65]; // max 1 command byte + 64 bytes FIFO
     uint8_t  rx[65]; // max 1 status byte + 64 bytes FIFO
     uint8_t  len;

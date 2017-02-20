@@ -15,6 +15,7 @@ int set_radio_parameters(	float freq_hz, float freq_if,
 	radio_parms->drate 			= data_rate;
 	radio_parms->mod_index 		= mod_index;
 	radio_parms->packet_length  = packet_length;
+
 	if (fec != 0 && fec != 1){
 		return -1;
 	}
@@ -22,12 +23,13 @@ int set_radio_parameters(	float freq_hz, float freq_if,
 	if (white != 0 && white != 1){
 		return -1;
 	}
-	radio_parms->whitening		= white;
+
+	radio_parms->whitening	    = white;
 	radio_parms->preamble 		= preamble;
 	radio_parms->sync_ctl 		= sync_word;
 
 	/* Set the nominal parameters */
-	radio_parms->f_xtal = 26000000;
+	radio_parms->f_xtal        = 26000000;
     radio_parms->chanspc_m     = 0;                // Do not use channel spacing for the moment defaulting to 0
     radio_parms->chanspc_e     = 0;                // Do not use channel spacing for the moment defaulting to 0
 	return 0;
@@ -81,8 +83,7 @@ int init_radio_config(spi_parms_t * spi_parms, radio_parms_t * radio_parms)
     // . bit  3:   0   -> Automatic flush of Rx FIFO disabled (too many side constraints see doc)
     // . bit  2:   1   -> Append two status bytes to the payload (RSSI and LQI + CRC OK)
     // . bits 1:0: 00  -> No address check of received packets
-    // only bit 2 is enabled, append status byte + crc
-    CC_SPIWriteReg(spi_parms, CC11xx_PKTCTRL1, 0x04); // Packet automation control.
+    CC_SPIWriteReg(spi_parms, CC11xx_PKTCTRL1, 0x00); // Packet automation control.
 
     CC_SPIWriteReg(spi_parms, CC11xx_ADDR,     0x00); // Device address for packet filtration (unused, see just above).
     CC_SPIWriteReg(spi_parms, CC11xx_CHANNR,   0x00); // Channel number (unused, use direct frequency programming).
@@ -185,7 +186,7 @@ int init_radio_config(spi_parms_t * spi_parms, radio_parms_t * radio_parms)
     //   1 (01): FSTXON
     //   2 (10): TX (stay)
     //   3 (11): RX 
-    CC_SPIWriteReg(spi_parms, CC11xx_MCSM1 ,   0x3C); //MainRadio Cntrl State Machine
+    CC_SPIWriteReg(spi_parms, CC11xx_MCSM1 ,   0x3F); //MainRadio Cntrl State Machine
 
     // MCSM0: Main Radio State Machine.
     // o bits 7:6: not used

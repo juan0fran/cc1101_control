@@ -31,7 +31,7 @@ int  CC_SPIWriteReg(spi_parms_t *spi_parms, uint8_t addr, uint8_t byte)
 	if (spi_parms->ret != 0){
 		return 1;
 	}
-	printf("Writting %02X to %02X\n", byte, addr);
+    spi_parms->status = spi_parms->rx[0];
 	return 0;
 }
 
@@ -53,7 +53,7 @@ int  CC_SPIWriteBurstReg(spi_parms_t *spi_parms, uint8_t addr, const uint8_t *by
     if (spi_parms->ret != 0){
         return 1;
     }
-
+    spi_parms->status = spi_parms->rx[0];
 	return 0;
 }
 
@@ -69,7 +69,7 @@ int  CC_SPIReadReg(spi_parms_t *spi_parms, uint8_t addr, uint8_t *byte)
         return 1;
     }
 	*byte = spi_parms->rx[1];
-
+    spi_parms->status = spi_parms->rx[0];
 	return 0;
 }
 
@@ -94,7 +94,7 @@ int  CC_SPIReadBurstReg(spi_parms_t *spi_parms, uint8_t addr, uint8_t **bytes, u
     }
 
     *bytes = &spi_parms->rx[1];
-
+    spi_parms->status = spi_parms->rx[0];
 	return 0;
 }
 
@@ -111,6 +111,7 @@ int  CC_SPIReadStatus(spi_parms_t *spi_parms, uint8_t addr, uint8_t *status)
         return 1;
     }
     *status = spi_parms->rx[1];
+    spi_parms->status = spi_parms->rx[0];
 	return 0;
 }
 
@@ -125,6 +126,7 @@ int  CC_SPIStrobe(spi_parms_t *spi_parms, uint8_t strobe)
     {
         return 1;
     }
+    spi_parms->status = spi_parms->rx[0];
 	return 0;
 }
 

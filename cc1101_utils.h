@@ -13,6 +13,7 @@
 
 #define MSLEEP(x) usleep(x*1000)
 #define MDELAY(x) MSLEEP(x)
+
 /* Preamble amount */
 typedef enum preamble_e {
     PREAMBLE_2,
@@ -41,11 +42,11 @@ typedef enum sync_word_e
 
 /* Different modulation types */
 typedef enum radio_modulation_e {
-    RADIO_MOD_OOK,
-    RADIO_MOD_FSK2,
-    RADIO_MOD_FSK4,
-    RADIO_MOD_MSK,
-    RADIO_MOD_GFSK,
+    RADIO_MOD_FSK2  = 0,
+    RADIO_MOD_GFSK  = 1,
+    RADIO_MOD_OOK   = 3,
+    RADIO_MOD_FSK4  = 4,
+    RADIO_MOD_MSK   = 7,
     NUM_RADIO_MOD
 } radio_modulation_t;
 
@@ -108,20 +109,19 @@ typedef struct radio_parms_s
 /* Handler for radio interrupt data */
 typedef volatile struct radio_int_data_s 
 {
-    spi_parms_t   *spi_parms;
-    radio_parms_t *radio_parms;
-    radio_mode_t mode;                   // Radio mode (essentially Rx or Tx)
-    uint8_t      packet_length;          // Fixed legth of packet or maximum length if variable
-    uint32_t     packet_rx_count;        // Number of packets received since put into action
-    uint32_t     packet_tx_count;        // Number of packets sent since put into action
-    uint8_t      tx_buf[CC11xx_PACKET_COUNT_SIZE+2]; // Tx buffer
-    uint8_t      tx_count;               // Number of bytes in Tx buffer
-    uint8_t      rx_buf[CC11xx_PACKET_COUNT_SIZE+2]; // Rx buffer
-    uint8_t      rx_count;               // Number of bytes in Rx buffer
-    uint8_t      bytes_remaining;        // Bytes remaining to be read from or written to buffer (composite mode)
-    uint8_t      byte_index;             // Current byte index in buffer
-    uint8_t      packet_receive;         // Indicates reception of a packet is in progress
-    uint8_t      packet_send;            // Indicates transmission of a packet is in progress
+    spi_parms_t     *spi_parms;
+    radio_parms_t   *radio_parms;
+    radio_mode_t    mode;                   // Radio mode (essentially Rx or Tx)
+    uint32_t        packet_rx_count;        // Number of packets received since put into action
+    uint32_t        packet_tx_count;        // Number of packets sent since put into action
+    uint8_t         tx_buf[CC11xx_PACKET_COUNT_SIZE]; // Tx buffer
+    uint8_t         tx_count;               // Number of bytes in Tx buffer
+    uint8_t         rx_buf[CC11xx_PACKET_COUNT_SIZE]; // Rx buffer
+    uint8_t         rx_count;               // Number of bytes in Rx buffer
+    uint8_t         bytes_remaining;        // Bytes remaining to be read from or written to buffer (composite mode)
+    uint8_t         byte_index;             // Current byte index in buffer
+    uint8_t         packet_receive;         // Indicates reception of a packet is in progress
+    uint8_t         packet_send;            // Indicates transmission of a packet is in progress
 } radio_int_data_t;
 
 float       rssi_dbm(uint8_t rssi_dec);

@@ -14,10 +14,6 @@ static uint32_t rate_values[] = {
     14400, 19200, 28800, 38400, 57600, 76800, 115200,
 };
 
-static uint8_t nb_preamble_bytes[] = {
-    2, 3, 4, 6, 8, 12, 16, 24
-};
-
 // ------------------------------------------------------------------------------------------------
 // Calculate RSSI in dBm from decimal RSSI read out of RSSI status register
 float rssi_dbm(uint8_t rssi_dec)
@@ -97,9 +93,6 @@ void get_chanbw_words(float bw, radio_parms_t *radio_parms)
             }
         }
     }
-
-    radio_parms->chanbw_e = 3;
-    radio_parms->chanbw_m = 3;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -110,12 +103,12 @@ void get_chanbw_words(float bw, radio_parms_t *radio_parms)
 void get_rate_words(rate_t data_rate, float mod_index, radio_parms_t *radio_parms)
 // ------------------------------------------------------------------------------------------------
 {
-    double drate, deviat, f_xtal;
+    float drate, deviat, f_xtal;
 
-    drate = (double) rate_values[data_rate];
+    drate = (float) rate_values[data_rate];
 
     deviat = drate * mod_index;
-    f_xtal = (double) radio_parms->f_xtal;
+    f_xtal = (float) radio_parms->f_xtal;
 
     get_chanbw_words(2.0*(deviat + drate), radio_parms); // Apply Carson's rule for bandwidth
 

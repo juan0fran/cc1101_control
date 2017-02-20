@@ -25,7 +25,7 @@ void gdo0_isr(void)
         if (int_line)
         {         
             p_radio_int_data->byte_index = 0;
-            p_radio_int_data->rx_count = p_radio_int_data->packet_length + 2;
+            p_radio_int_data->rx_count = p_radio_int_data->radio_parms->packet_length;
             p_radio_int_data->bytes_remaining = p_radio_int_data->rx_count;
             p_radio_int_data->packet_receive = 1; // reception is in progress
         }
@@ -41,9 +41,8 @@ void gdo0_isr(void)
                 p_radio_int_data->mode = RADIOMODE_NONE;
                 p_radio_int_data->packet_receive = 0; // reception is done
                 p_radio_int_data->packet_rx_count++;
-                /* Just send the packet into the queue, gosh this is so easy --> fucking ISR */
+
                 radio_init_rx(p_radio_int_data->spi_parms, p_radio_int_data->radio_parms);
-                radio_turn_rx(p_radio_int_data->spi_parms);
             }
         }    
     }    
@@ -63,11 +62,10 @@ void gdo0_isr(void)
 
                 if ((p_radio_int_data->bytes_remaining))
                 {
-                    radio_flush_fifos(p_radio_int_data->spi_parms);
+                    radio_flush_fifos(p_radio_int_data->spi_parms);            
                 }
-                /* Just put again into RX, this is a fucking holy easy shit */
+
                 radio_init_rx(p_radio_int_data->spi_parms, p_radio_int_data->radio_parms);
-                radio_turn_rx(p_radio_int_data->spi_parms);
             }
         }
     }
