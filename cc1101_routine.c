@@ -1,7 +1,5 @@
-#include <stdint.h>
 #include <string.h>
-#include <stdbool.h>
-
+#include <stdlib.h>
 #include <math.h>
 
 #include "cc1101_routine.h"
@@ -16,6 +14,8 @@ static bool init_radio = false;
 
 static uint8_t rx_aux_buffer[CC11xx_FIFO_SIZE];
 
+volatile float last_rssi;
+volatile uint8_t last_lqi;
 
 static float chanbw_limits[] = {
     812000.0, 650000.0, 541000.0, 464000.0, 406000.0, 325000.0, 270000.0, 232000.0,
@@ -33,7 +33,7 @@ static uint32_t rate_values[] = {
 void gdo0_isr(void)
 // ------------------------------------------------------------------------------------------------
 {
-    uint8_t int_line, rssi_dec, crc_lqi;
+    uint8_t int_line, status;
     if (init_radio == false){
         return;
     }
@@ -59,13 +59,17 @@ void gdo0_isr(void)
 
                 radio_int_data.mode = RADIOMODE_NONE;
                 radio_int_data.packet_receive = 0; // reception is done
-                radio_int_data.packet_rx_count++;
-
+								
+								/* get lqi and rssi */
+								CC_SPIReadStatus(radio_int_data.spi_parms, CC11xx_LQI, &status);
+								if ( (status&0x80) == 0x80){
+									radio_int_data.packet_rx_count++;
+								}
+								last_lqi = status&0x7F;
+								CC_SPIReadStatus(radio_int_data.spi_parms, CC11xx_RSSI, &status);
+								last_rssi = rssi_dbm(status);
+								
                 radio_turn_rx_isr(radio_int_data.spi_parms);
-            }
-            else
-            {
-                /* Some protection here */
             }
         }    
     }    
@@ -85,13 +89,15 @@ void gdo0_isr(void)
 
                 if ((radio_int_data.bytes_remaining))
                 {
-                    radio_flush_fifos(radio_int_data.spi_parms);            
+                    radio_turn_idle(radio_int_data.spi_parms);          
                 }
                 radio_turn_rx_isr(radio_int_data.spi_parms);
             }
             else
             {
                 /* Some protection here */
+								radio_turn_idle(radio_int_data.spi_parms);
+								radio_turn_rx_isr(radio_int_data.spi_parms);
             }
         }
     }
@@ -103,7 +109,7 @@ void gdo0_isr(void)
 void gdo2_isr(void)
 // ------------------------------------------------------------------------------------------------
 {
-    uint8_t i, int_line, bytes_to_send;
+    uint8_t int_line, bytes_to_send;
     if (init_radio == false){
         return;
     }
@@ -123,6 +129,8 @@ void gdo2_isr(void)
         else
         {
             /* Some protection here */
+						radio_turn_idle(radio_int_data.spi_parms);
+						radio_turn_rx_isr(radio_int_data.spi_parms);
         }
     }
     else if ((radio_int_data.mode == RADIOMODE_TX) && (!int_line)) // Depletion of Tx FIFO - Write at most next TX_FIFO_REFILL bytes
@@ -138,52 +146,52 @@ void gdo2_isr(void)
                 bytes_to_send = TX_FIFO_REFILL;
             }
             CC_SPIWriteBurstReg(radio_int_data.spi_parms, CC11xx_TXFIFO, (uint8_t *) &(radio_int_data.tx_buf[radio_int_data.byte_index]), bytes_to_send);
-            /* Check for status byte in each */
 
+            /* Check for status byte in each */
             radio_int_data.byte_index += bytes_to_send;
             radio_int_data.bytes_remaining -= bytes_to_send;
-        }
-        else
-        {
-            /* Some protection here */
         }
     }
 }
 
-
-int set_radio_parameters(   float freq_hz, float freq_if, 
-                            radio_modulation_t mod, rate_t data_rate, float mod_index,
-                            uint8_t packet_length, uint8_t fec, uint8_t white,      
-                            preamble_t preamble, sync_word_t sync_word,
-                            radio_parms_t * radio_parms)
+int set_freq_parameters(float freq_hz, float freq_if, float freq_off, radio_parms_t * radio_parms)
 {
-    if (freq_hz < 430e6 || freq_hz > 440e6){
-        return -1;
-    }
     radio_parms->freq_hz        = freq_hz;
     radio_parms->f_if           = freq_if;
-    radio_parms->modulation     = mod;
-    radio_parms->drate          = data_rate;
-    radio_parms->mod_index      = mod_index;
-    radio_parms->packet_length  = packet_length;
-
-    if (fec != 0 && fec != 1){
-        return -1;
-    }
-    radio_parms->fec            = fec;
-    if (white != 0 && white != 1){
-        return -1;
-    }
-
-    radio_parms->whitening      = white;
-    radio_parms->preamble       = preamble;
-    radio_parms->sync_ctl       = sync_word;
+		radio_parms->f_off 					= freq_off;
 
     /* Set the nominal parameters */
     radio_parms->f_xtal        = 26000000;
     radio_parms->chanspc_m     = 0;                // Do not use channel spacing for the moment defaulting to 0
     radio_parms->chanspc_e     = 0;                // Do not use channel spacing for the moment defaulting to 0
-    return 0;
+		
+		return 0;
+}
+
+int set_sync_parameters(preamble_t preamble, sync_word_t sync_word, uint32_t timeout_ms, radio_parms_t * radio_parms)
+{
+    radio_parms->preamble       = preamble;
+    radio_parms->sync_ctl       = sync_word;
+		radio_parms->timeout 				= timeout_ms;
+	
+		return 0;
+}
+
+int set_packet_parameters(uint8_t packet_length, bool fec, bool white, radio_parms_t * radio_parms)
+{
+		radio_parms->packet_length  = packet_length;
+		radio_parms->fec            = (uint8_t) fec;
+    radio_parms->whitening      = (uint8_t) white;
+		
+		return 0;
+}
+int set_modulation_parameters(radio_modulation_t mod, rate_t data_rate, float mod_index, radio_parms_t * radio_parms)
+{
+    radio_parms->modulation     = mod;
+    radio_parms->drate          = data_rate;
+    radio_parms->mod_index      = mod_index;
+
+		return 0;
 }
 
 int init_radio_config(spi_parms_t * spi_parms, radio_parms_t * radio_parms)
@@ -243,7 +251,8 @@ int init_radio_config(spi_parms_t * spi_parms, radio_parms_t * radio_parms)
 
     // FSCTRL0: Frequency offset added to the base frequency before being used by the
     // frequency synthesizer. (2s-complement). Multiplied by Fxtal/2^14
-    CC_SPIWriteReg(spi_parms, CC11xx_FSCTRL0,  0x00); // Freq synthesizer control.
+		reg_word = get_offset_word(radio_parms->f_xtal, radio_parms->f_off);
+    CC_SPIWriteReg(spi_parms, CC11xx_FSCTRL0,  reg_word); // Freq synthesizer control.
 
     // FSCTRL1: The desired IF frequency to employ in RX. Subtracted from FS base frequency
     // in RX and controls the digital complex mixer in the demodulator. Multiplied by Fxtal/2^10
@@ -284,7 +293,7 @@ int init_radio_config(spi_parms_t * spi_parms, radio_parms_t * radio_parms)
     // o bits 6:4: xxx -> (provided)
     // o bit 3:    0   -> Manchester disabled (1: enable)
     // o bits 2:0: 011 -> Sync word qualifier is 30/32 (static init in radio interface)
-    reg_word = (get_mod_word(radio_parms->modulation)<<4) + radio_parms->sync_ctl;
+    reg_word = ((radio_parms->modulation)<<4) + radio_parms->sync_ctl;
     CC_SPIWriteReg(spi_parms, CC11xx_MDMCFG2,  reg_word); // Modem configuration.
 
     // MODCFG1 Modem configuration: FEC, Preamble, exponent for channel spacing
@@ -564,31 +573,9 @@ uint32_t get_if_word(uint32_t freq_xtal, uint32_t if_hz)
     return (if_hz * (1<<10)) / freq_xtal;
 }
 
-// ------------------------------------------------------------------------------------------------
-// Calculate modulation format word MOD_FORMAT[2..0]
-uint8_t get_mod_word(radio_modulation_t modulation_code)
-// ------------------------------------------------------------------------------------------------
+uint8_t get_offset_word(uint32_t freq_xtal, uint32_t offset_hz)
 {
-    switch (modulation_code)
-    {
-        case RADIO_MOD_OOK:
-            return 3;
-            break;
-        case RADIO_MOD_FSK2:
-            return 0;
-            break;
-        case RADIO_MOD_FSK4:
-            return 4;
-            break;
-        case RADIO_MOD_MSK:
-            return 7;
-            break;
-        case RADIO_MOD_GFSK:
-            return 1;
-            break;
-        default:
-            return 0;
-    }
+		return ((offset_hz * (1 << 14)) / freq_xtal) &0xFF;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -627,7 +614,7 @@ void get_rate_words(rate_t data_rate, float mod_index, radio_parms_t *radio_parm
     deviat = drate * mod_index;
     f_xtal = (float) radio_parms->f_xtal;
 
-    get_chanbw_words(2.0*(deviat + drate), radio_parms); // Apply Carson's rule for bandwidth
+    get_chanbw_words(2.0f*(deviat + drate), radio_parms); // Apply Carson's rule for bandwidth
 
     radio_parms->drate_e = (uint8_t) (floor(log2( drate*(1<<20) / f_xtal )));
     radio_parms->drate_m = (uint8_t) (((drate*(1<<28)) / (f_xtal * (1<<radio_parms->drate_e))) - 256);
@@ -683,8 +670,10 @@ void radio_turn_idle(spi_parms_t *spi_parms)
 
 void radio_turn_rx_isr(spi_parms_t *spi_parms)
 {
+		CC_SPIWriteReg(spi_parms, CC11xx_MCSM1, 0x30);
     CC_SPIWriteReg(spi_parms, CC11xx_IOCFG2, 0x00); // GDO2 output pin config RX mode
     radio_int_data.packet_receive = 0;
+		radio_int_data.packet_send = 0;
     radio_int_data.mode = RADIOMODE_RX;   
     CC_SPIStrobe(spi_parms, CC11xx_SRX);
 }
@@ -706,6 +695,7 @@ void radio_init_rx(spi_parms_t *spi_parms, radio_parms_t * radio_parms)
     radio_int_data.mode = RADIOMODE_RX;
     radio_int_data.packet_receive = 0;    
     radio_set_packet_length(spi_parms, radio_parms->packet_length);
+		CC_SPIWriteReg(spi_parms, CC11xx_MCSM1, 0x30);
     CC_SPIWriteReg(spi_parms, CC11xx_IOCFG2, 0x00); // GDO2 output pin config RX mode
 }
 
@@ -759,29 +749,32 @@ static void radio_send_block(spi_parms_t *spi_parms)
     /* Set this shit to CCA --> Poll for this? Use ISR? */
     /* Lets start by polling GDO2 pin, if is 1, then Random Back off, look for 1 again and go! */
     /* The radio is always in RX */
+		CC_SPIWriteReg(spi_parms, CC11xx_MCSM1, 	 0x30);
     CC_SPIWriteReg(spi_parms, CC11xx_IOCFG2,   0x09); // GDO2 output pin config TX mode
+		
     radio_turn_rx(spi_parms);
 
     MDELAY(1);
     /* Wait 1 ms to the RX to be set */
-	cca_count = 0;
-	do{
-		MDELAY(rand()%256);
-		cca_count++;
-		cca = CC11xx_GDO2();
-	}while((cca == 0) && (cca_count < 3)); 	/* If CCA == 0 (channel is not clear) remain in the loop */
-									 		/* If cca_count is < 3 remain in the loop */
-	if (cca_count >= 3 && cca == 0){
-		/* If the limit is completed -> go out */
-        /* Put this shit into RX */
-        radio_turn_idle(spi_parms);
-        radio_init_rx(spi_parms);
-        radio_turn_rx(spi_parms);
-		return;
-	}
+		cca_count = 0;
+		do{
+			MDELAY(rand()%256);
+			cca_count++;
+			cca = CC11xx_GDO2();
+		}while((cca == 0) && (cca_count < 3)); 	/* If CCA == 0 (channel is not clear) remain in the loop */
+												/* If cca_count is < 3 remain in the loop */
+		if (cca_count >= 3 && cca == 0){
+			/* If the limit is completed -> go out */
+			/* Put this shit into RX */
+			radio_turn_idle(spi_parms);
+			radio_init_rx(spi_parms, radio_int_data.radio_parms);
+			radio_turn_rx(spi_parms);
+			return;
+		}
 
-	/* Here is TX */
-	CC_SPIWriteReg(spi_parms, CC11xx_IOCFG2,   0x02); // GDO2 output pin config TX mode
+		/* Here is TX */
+		CC_SPIWriteReg(spi_parms, CC11xx_MCSM1, 	 0x00);
+		CC_SPIWriteReg(spi_parms, CC11xx_IOCFG2,   0x02); // GDO2 output pin config TX mode
     radio_int_data.mode = RADIOMODE_TX;
     // Initial number of bytes to put in FIFO is either the number of bytes to send or the FIFO size whichever is
     // the smallest. Actual size blocks you need to take size minus one byte.
@@ -790,7 +783,8 @@ static void radio_send_block(spi_parms_t *spi_parms)
     CC_SPIWriteBurstReg(spi_parms, CC11xx_TXFIFO, (uint8_t *) radio_int_data.tx_buf, initial_tx_count);
     radio_int_data.byte_index = initial_tx_count;
     radio_int_data.bytes_remaining = radio_int_data.tx_count - initial_tx_count;
- 	CC_SPIStrobe(spi_parms, CC11xx_STX); // Kick-off Tx
+		CC_SPIStrobe(spi_parms, CC11xx_STX); // Kick-off Tx
+		
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -799,10 +793,17 @@ void radio_send_packet(spi_parms_t *spi_parms, radio_parms_t * radio_parms, uint
 // ------------------------------------------------------------------------------------------------
 {
     /* Timeout? */
-    while(radio_int_data.mode == RADIOMODE_TX || radio_int_data.packet_receive)
+		volatile uint16_t timeout = 0;
+    while( (radio_int_data.mode == RADIOMODE_TX || radio_int_data.packet_receive) && ++timeout < radio_parms->timeout)
     {
         MSLEEP(1);
     }
+		if (timeout >= radio_parms->timeout)
+		{
+			timeout = 0;
+			/* Dropped packet */
+			return;
+		}
     radio_turn_idle(spi_parms);
 
     radio_int_data.tx_count = radio_parms->packet_length; // same block size for all
@@ -815,13 +816,13 @@ void radio_send_packet(spi_parms_t *spi_parms, radio_parms_t * radio_parms, uint
 void enable_isr_routine(spi_parms_t * spi, radio_parms_t * radio_parms)
 {
 	radio_int_data.mode = RADIOMODE_NONE;
-    radio_int_data.packet_rx_count = 0;
-    radio_int_data.packet_tx_count = 0;
+	radio_int_data.packet_rx_count = 0;
+	radio_int_data.packet_tx_count = 0;
 	radio_int_data.spi_parms = &spi_parms_it;
 	radio_int_data.radio_parms = radio_parms;
-    init_radio = true;
+	init_radio = true;
 	/* enable RX! */
-    radio_init_rx(radio_int_data.spi_parms, radio_int_data.radio_parms);
+	radio_init_rx(radio_int_data.spi_parms, radio_int_data.radio_parms);
 	radio_turn_rx(radio_int_data.spi_parms);
 }
 
@@ -881,7 +882,7 @@ int  CC_SPIReadReg(spi_parms_t *spi_parms, uint8_t addr, uint8_t *byte)
 
 /* Correct read burst to be multiple calls to read reg */
 
-int  CC_SPIReadBurstReg(spi_parms_t *spi_parms, uint8_t addr, uint8_t **bytes, uint8_t count)
+int  CC_SPIReadBurstReg(spi_parms_t *spi_parms, uint8_t addr, uint8_t *bytes, uint8_t count)
 {    
     uint8_t i;
 
@@ -901,7 +902,7 @@ int  CC_SPIReadBurstReg(spi_parms_t *spi_parms, uint8_t addr, uint8_t **bytes, u
         return 1;
     }
 
-    *bytes = &spi_parms->rx[1];
+		memcpy(bytes, &spi_parms->rx[1], count);
     spi_parms->status = spi_parms->rx[0];
     return 0;
 }
@@ -947,11 +948,13 @@ int  CC_PowerupResetCCxxxx(spi_parms_t *spi_parms)
 void disable_IT(void)
 {
     /* Must be changed */
-
+		HAL_NVIC_DisableIRQ(EXTI0_IRQn);
+		HAL_NVIC_DisableIRQ(EXTI9_5_IRQn);
 }
 
 void enable_IT(void)
 {
-
-
+		/* Must be changed */
+		HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+		HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 }

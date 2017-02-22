@@ -1,6 +1,9 @@
 #ifndef __CC1101_DEFINES_H__
 #define __CC1101_DEFINES_H__
 
+#include <stdint.h>
+#include <stdbool.h>
+
 /* Preamble amount */
 typedef enum preamble_e {
     PREAMBLE_2,
@@ -192,7 +195,7 @@ typedef enum CC11xx_state_e {
 
 
 /* spi structure */
-typedef volatile struct spi_parms_s
+typedef struct spi_parms_s
 {
     int      fd;
     int      ret;    /* Ret value of funcking SPI */
@@ -208,6 +211,7 @@ typedef struct radio_parms_s
     uint32_t           f_xtal;        // Crystal frequency (Hz)
     float              freq_hz;       // RF frequency;
     float              f_if;          // IF frequency (Hz)
+		float 						 f_off;
     uint8_t            packet_length; // Packet length if fixed
     radio_modulation_t modulation;    // Type of modulation
     rate_t             drate;         // Data rate of the system
@@ -216,7 +220,7 @@ typedef struct radio_parms_s
     uint8_t            whitening;     // Whitening useds
     preamble_t         preamble;      // Preamble count
     sync_word_t        sync_ctl;      // Sync word control
-    float              deviat_factor; // FSK-2 deviation is +/- data rate divised by this factor
+    uint32_t 					 timeout;				// Timeout for packet CCA
     uint32_t           freq_word;     // Frequency 24 bit word FREQ[23..0]
     uint8_t            chanspc_m;     // Channel spacing mantissa 
     uint8_t            chanspc_e;     // Channel spacing exponent
@@ -253,7 +257,7 @@ int     CC_SPIInit(spi_parms_t *spi_parms);
 int     CC_SPIWriteReg(spi_parms_t *spi_parms, uint8_t addr, uint8_t byte);
 int     CC_SPIWriteBurstReg(spi_parms_t *spi_parms, uint8_t addr, const uint8_t *bytes, uint8_t count);
 int     CC_SPIReadReg(spi_parms_t *spi_parms, uint8_t addr, uint8_t *byte);
-int     CC_SPIReadBurstReg(spi_parms_t *spi_parms, uint8_t addr, uint8_t **bytes, uint8_t count);
+int     CC_SPIReadBurstReg(spi_parms_t *spi_parms, uint8_t addr, uint8_t *bytes, uint8_t count);
 int     CC_SPIReadStatus(spi_parms_t *spi_parms, uint8_t addr, uint8_t *status);
 int     CC_SPIStrobe(spi_parms_t *spi_parms, uint8_t strobe);
 int     CC_PowerupResetCCxxxx(spi_parms_t *spi_parms);
@@ -262,11 +266,11 @@ int     CC11xx_GDO0(void);
 void    disable_IT(void);
 void    enable_IT(void);
 
-int set_radio_parameters(   float freq_hz, float freq_if, 
-                            radio_modulation_t mod, rate_t data_rate, float mod_index,
-                            uint8_t packet_length, uint8_t fec, uint8_t white,      
-                            preamble_t preamble, sync_word_t sync_word,
-                            radio_parms_t * radio_parms);
+int set_freq_parameters(float freq_hz, float freq_if, float freq_off, radio_parms_t * radio_parms);
+int set_sync_parameters(preamble_t preamble, sync_word_t sync_word, uint32_t timeout_ms, radio_parms_t * radio_parms);
+int set_packet_parameters(uint8_t packet_length, bool fec, bool white, radio_parms_t * radio_parms);
+int set_modulation_parameters(radio_modulation_t mod, rate_t data_rate, float mod_index, radio_parms_t * radio_parms);
+
 
 int init_radio_config(spi_parms_t * spi_parms, radio_parms_t * radio_parms);
 
@@ -274,7 +278,8 @@ float       rssi_dbm(uint8_t rssi_dec);
 
 uint32_t    get_freq_word(uint32_t freq_xtal, uint32_t freq_hz);
 uint32_t    get_if_word(uint32_t freq_xtal, uint32_t if_hz);
-uint8_t     get_mod_word(radio_modulation_t modulation_code);
+uint8_t 		get_offset_word(uint32_t freq_xtal, uint32_t offset_hz);
+
 void        get_chanbw_words(float bw, radio_parms_t *radio_parms);
 void        get_rate_words(rate_t data_rate, float mod_index, radio_parms_t *radio_parms);
 
@@ -298,4 +303,8 @@ void        radio_send_packet(spi_parms_t *spi_parms, radio_parms_t * radio_parm
 
 void        enable_isr_routine(spi_parms_t *spi_parms, radio_parms_t * radio_parms);
 
+void				gdo0_isr(void);
+void				gdo2_isr(void);
+
 #endif
+
