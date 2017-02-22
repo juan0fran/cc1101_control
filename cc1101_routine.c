@@ -7,11 +7,16 @@
 #include "cc1101_routine.h"
 #include "cc1101_wrapper.h"
 
-#define TX_FIFO_REFILL 60 // With the default FIFO thresholds selected this is the number of bytes to refill the Tx FIFO
+#define TX_FIFO_REFILL 58 // With the default FIFO thresholds selected this is the number of bytes to refill the Tx FIFO
 #define RX_FIFO_UNLOAD 59 // With the default FIFO thresholds selected this is the number of bytes to unload from the Rx FIFO
 
-static radio_int_data_t radio_int_data;
+static spi_parms_t spi_parms_it;
+radio_int_data_t radio_int_data;
 static bool init_radio = false;
+
+static uint8_t rx_aux_buffer[CC11xx_FIFO_SIZE];
+
+
 static float chanbw_limits[] = {
     812000.0, 650000.0, 541000.0, 464000.0, 406000.0, 325000.0, 270000.0, 232000.0,
     203000.0, 162000.0, 135000.0, 116000.0, 102000.0, 81000.0, 68000.0, 58000.0
@@ -28,8 +33,7 @@ static uint32_t rate_values[] = {
 void gdo0_isr(void)
 // ------------------------------------------------------------------------------------------------
 {
-    uint8_t x_byte, *p_byte, int_line, rssi_dec, crc_lqi;
-    int i;
+    uint8_t int_line, rssi_dec, crc_lqi;
     if (init_radio == false){
         return;
     }
@@ -48,14 +52,20 @@ void gdo0_isr(void)
         {
             if (radio_int_data.packet_receive) // packet has been received
             {
-                CC_SPIReadBurstReg(radio_int_data.spi_parms, CC11xx_RXFIFO, &p_byte, radio_int_data.bytes_remaining);
-                memcpy((uint8_t *) &(radio_int_data.rx_buf[radio_int_data.byte_index]), p_byte, radio_int_data.bytes_remaining);
+                CC_SPIReadBurstReg(radio_int_data.spi_parms, CC11xx_RXFIFO, rx_aux_buffer, radio_int_data.bytes_remaining);
+                memcpy((uint8_t *) &(radio_int_data.rx_buf[radio_int_data.byte_index]), rx_aux_buffer, radio_int_data.bytes_remaining);
                 radio_int_data.byte_index += radio_int_data.bytes_remaining;
                 radio_int_data.bytes_remaining = 0;
 
                 radio_int_data.mode = RADIOMODE_NONE;
                 radio_int_data.packet_receive = 0; // reception is done
                 radio_int_data.packet_rx_count++;
+
+                radio_turn_rx_isr(radio_int_data.spi_parms);
+            }
+            else
+            {
+                /* Some protection here */
             }
         }    
     }    
@@ -77,6 +87,11 @@ void gdo0_isr(void)
                 {
                     radio_flush_fifos(radio_int_data.spi_parms);            
                 }
+                radio_turn_rx_isr(radio_int_data.spi_parms);
+            }
+            else
+            {
+                /* Some protection here */
             }
         }
     }
@@ -88,7 +103,7 @@ void gdo0_isr(void)
 void gdo2_isr(void)
 // ------------------------------------------------------------------------------------------------
 {
-    uint8_t i, int_line, bytes_to_send, x_byte, *p_byte;
+    uint8_t i, int_line, bytes_to_send;
     if (init_radio == false){
         return;
     }
@@ -98,10 +113,16 @@ void gdo2_isr(void)
     {
         if (radio_int_data.packet_receive) // if reception has started
         {
-            CC_SPIReadBurstReg(radio_int_data.spi_parms, CC11xx_RXFIFO, &p_byte, RX_FIFO_UNLOAD);
-            memcpy((uint8_t *) &(radio_int_data.rx_buf[radio_int_data.byte_index]), p_byte, RX_FIFO_UNLOAD);
+            /* if this shit wants to write but rx_buf will overload, just break */
+            CC_SPIReadBurstReg(radio_int_data.spi_parms, CC11xx_RXFIFO, rx_aux_buffer, RX_FIFO_UNLOAD);
+            /* Check for status byte in each */
+            memcpy((uint8_t *) &(radio_int_data.rx_buf[radio_int_data.byte_index]), rx_aux_buffer, RX_FIFO_UNLOAD);
             radio_int_data.byte_index += RX_FIFO_UNLOAD;
             radio_int_data.bytes_remaining -= RX_FIFO_UNLOAD;            
+        }
+        else
+        {
+            /* Some protection here */
         }
     }
     else if ((radio_int_data.mode == RADIOMODE_TX) && (!int_line)) // Depletion of Tx FIFO - Write at most next TX_FIFO_REFILL bytes
@@ -116,10 +137,15 @@ void gdo2_isr(void)
             {
                 bytes_to_send = TX_FIFO_REFILL;
             }
-
             CC_SPIWriteBurstReg(radio_int_data.spi_parms, CC11xx_TXFIFO, (uint8_t *) &(radio_int_data.tx_buf[radio_int_data.byte_index]), bytes_to_send);
+            /* Check for status byte in each */
+
             radio_int_data.byte_index += bytes_to_send;
             radio_int_data.bytes_remaining -= bytes_to_send;
+        }
+        else
+        {
+            /* Some protection here */
         }
     }
 }
@@ -168,6 +194,8 @@ int init_radio_config(spi_parms_t * spi_parms, radio_parms_t * radio_parms)
 
     CC_PowerupResetCCxxxx(spi_parms);
     
+    /* Patable Write here? */
+
     // IOCFG2 = 0x00: Set in Rx mode (0x02 for Tx mode)
     // o 0x00: Asserts when RX FIFO is filled at or above the RX FIFO threshold. 
     //         De-asserts when RX FIFO is drained below the same threshold.
@@ -311,7 +339,7 @@ int init_radio_config(spi_parms_t * spi_parms, radio_parms_t * radio_parms)
     //   1 (01): FSTXON
     //   2 (10): TX (stay)
     //   3 (11): RX 
-    CC_SPIWriteReg(spi_parms, CC11xx_MCSM1 ,   0x3F); //MainRadio Cntrl State Machine
+    CC_SPIWriteReg(spi_parms, CC11xx_MCSM1 ,   0x30); //MainRadio Cntrl State Machine
 
     // MCSM0: Main Radio State Machine.
     // o bits 7:6: not used
@@ -650,6 +678,15 @@ void radio_turn_idle(spi_parms_t *spi_parms)
 // ------------------------------------------------------------------------------------------------
 {
     CC_SPIStrobe(spi_parms, CC11xx_SIDLE);
+    radio_flush_fifos(spi_parms);
+}
+
+void radio_turn_rx_isr(spi_parms_t *spi_parms)
+{
+    CC_SPIWriteReg(spi_parms, CC11xx_IOCFG2, 0x00); // GDO2 output pin config RX mode
+    radio_int_data.packet_receive = 0;
+    radio_int_data.mode = RADIOMODE_RX;   
+    CC_SPIStrobe(spi_parms, CC11xx_SRX);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -713,9 +750,9 @@ static void radio_send_block(spi_parms_t *spi_parms)
 // ------------------------------------------------------------------------------------------------
 {
     uint8_t  initial_tx_count; // Number of bytes to send in first batch
-    int      i, ret;
     uint8_t  cca, cca_count;
-    radio_int_data.mode = RADIOMODE_TX;
+
+    radio_int_data.mode = RADIOMODE_NONE;
     radio_int_data.packet_send = 0;
 
     radio_set_packet_length(spi_parms, radio_int_data.tx_count);
@@ -736,12 +773,16 @@ static void radio_send_block(spi_parms_t *spi_parms)
 									 		/* If cca_count is < 3 remain in the loop */
 	if (cca_count >= 3 && cca == 0){
 		/* If the limit is completed -> go out */
+        /* Put this shit into RX */
+        radio_turn_idle(spi_parms);
+        radio_init_rx(spi_parms);
+        radio_turn_rx(spi_parms);
 		return;
 	}
 
 	/* Here is TX */
 	CC_SPIWriteReg(spi_parms, CC11xx_IOCFG2,   0x02); // GDO2 output pin config TX mode
-
+    radio_int_data.mode = RADIOMODE_TX;
     // Initial number of bytes to put in FIFO is either the number of bytes to send or the FIFO size whichever is
     // the smallest. Actual size blocks you need to take size minus one byte.
     initial_tx_count = (radio_int_data.tx_count > CC11xx_FIFO_SIZE-1 ? CC11xx_FIFO_SIZE-1 : radio_int_data.tx_count);
@@ -757,9 +798,17 @@ static void radio_send_block(spi_parms_t *spi_parms)
 void radio_send_packet(spi_parms_t *spi_parms, radio_parms_t * radio_parms, uint8_t *packet, uint8_t size)
 // ------------------------------------------------------------------------------------------------
 {
+    /* Timeout? */
+    while(radio_int_data.mode == RADIOMODE_TX || radio_int_data.packet_receive)
+    {
+        MSLEEP(1);
+    }
+    radio_turn_idle(spi_parms);
+
     radio_int_data.tx_count = radio_parms->packet_length; // same block size for all
     memset((uint8_t *) &radio_int_data.tx_buf[0], 0, radio_parms->packet_length);
     memcpy((uint8_t *) &radio_int_data.tx_buf[0], packet, size);
+
     radio_send_block(spi_parms);
 }
 
@@ -768,7 +817,7 @@ void enable_isr_routine(spi_parms_t * spi, radio_parms_t * radio_parms)
 	radio_int_data.mode = RADIOMODE_NONE;
     radio_int_data.packet_rx_count = 0;
     radio_int_data.packet_tx_count = 0;
-	radio_int_data.spi_parms = spi;
+	radio_int_data.spi_parms = &spi_parms_it;
 	radio_int_data.radio_parms = radio_parms;
     init_radio = true;
 	/* enable RX! */
@@ -789,6 +838,8 @@ int  CC_SPIWriteReg(spi_parms_t *spi_parms, uint8_t addr, uint8_t byte)
     spi_parms->status = spi_parms->rx[0];
     return 0;
 }
+
+/* Correct write burst to be multiple calls to write reg */
 
 int  CC_SPIWriteBurstReg(spi_parms_t *spi_parms, uint8_t addr, const uint8_t *bytes, uint8_t count)
 {
@@ -827,6 +878,8 @@ int  CC_SPIReadReg(spi_parms_t *spi_parms, uint8_t addr, uint8_t *byte)
     spi_parms->status = spi_parms->rx[0];
     return 0;
 }
+
+/* Correct read burst to be multiple calls to read reg */
 
 int  CC_SPIReadBurstReg(spi_parms_t *spi_parms, uint8_t addr, uint8_t **bytes, uint8_t count)
 {    
@@ -890,21 +943,10 @@ int  CC_PowerupResetCCxxxx(spi_parms_t *spi_parms)
     return CC_SPIStrobe(spi_parms, CC11xx_SRES);
 }
 
-int CC11xx_GDO2(void)
-{
-
-
-}
-
-int CC11xx_GDO0(void)
-{
-
-    
-}
 
 void disable_IT(void)
 {
-
+    /* Must be changed */
 
 }
 

@@ -192,13 +192,13 @@ typedef enum CC11xx_state_e {
 
 
 /* spi structure */
-typedef struct spi_parms_s
+typedef volatile struct spi_parms_s
 {
     int      fd;
     int      ret;    /* Ret value of funcking SPI */
     uint8_t  status;
-    uint8_t  tx[65]; // max 1 command byte + 64 bytes FIFO
-    uint8_t  rx[65]; // max 1 status byte + 64 bytes FIFO
+    uint8_t  tx[CC11xx_FIFO_SIZE + 1]; // max 1 command byte + 64 bytes FIFO
+    uint8_t  rx[CC11xx_FIFO_SIZE + 1]; // max 1 status byte + 64 bytes FIFO
     uint8_t  len;
 } spi_parms_t;
 
@@ -282,6 +282,7 @@ void        wait_for_state(spi_parms_t *spi_parms, CC11xx_state_t state, uint32_
 
 void        radio_turn_idle(spi_parms_t *spi_parms);
 /* Those 2 functions used for putting CC1101 in RX mode */
+void        radio_turn_rx_isr(spi_parms_t *spi_parms);
 void        radio_turn_rx(spi_parms_t *spi_parms);
 void        radio_init_rx(spi_parms_t *spi_parms, radio_parms_t * radio_parms);
 
