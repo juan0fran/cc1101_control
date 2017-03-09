@@ -39,66 +39,61 @@ void gdo0_isr(void)
     }
     int_line = CC11xx_GDO0(); // Sense interrupt line to determine if it was a raising or falling edge
 
-    if (radio_int_data.mode == RADIOMODE_RX)
-    {
-        if (int_line)
-        {         
+    if (radio_int_data.mode == RADIOMODE_RX){
+        if (int_line){         
             radio_int_data.byte_index = 0;
             radio_int_data.rx_count = radio_int_data.radio_parms->packet_length;
             radio_int_data.bytes_remaining = radio_int_data.rx_count;
             radio_int_data.packet_receive = 1; // reception is in progress
-        }
-        else
-        {
-            if (radio_int_data.packet_receive) // packet has been received
-            {
-                CC_SPIReadBurstReg(radio_int_data.spi_parms, CC11xx_RXFIFO, rx_aux_buffer, radio_int_data.bytes_remaining);
-                memcpy((uint8_t *) &(radio_int_data.rx_buf[radio_int_data.byte_index]), rx_aux_buffer, radio_int_data.bytes_remaining);
-                radio_int_data.byte_index += radio_int_data.bytes_remaining;
-                radio_int_data.bytes_remaining = 0;
+        }else{
+            if (radio_int_data.packet_receive){
 
-                radio_int_data.mode = RADIOMODE_NONE;
-                radio_int_data.packet_receive = 0; // reception is done
-								
-								/* get lqi and rssi */
-								CC_SPIReadStatus(radio_int_data.spi_parms, CC11xx_LQI, &status);
-								if ( (status&0x80) == 0x80){
-									radio_int_data.packet_rx_count++;
-								}
-								last_lqi = status&0x7F;
-								CC_SPIReadStatus(radio_int_data.spi_parms, CC11xx_RSSI, &status);
-								last_rssi = rssi_dbm(status);
-								
+                CC_SPIReadStatus(radio_int_data.spi_parms, CC11xxRXBYTES, &status);
+                if (status&0x80 == 0x80){ /* Overflow */
+                    radio_turn_idle(radio_int_data.spi_parms);
+                    radio_int_data.mode = RADIOMODE_NONE;
+                    radio_int_data.packet_receive = 0; // reception is done                    
+                }else{
+                    CC_SPIReadBurstReg(radio_int_data.spi_parms, CC11xx_RXFIFO, rx_aux_buffer, radio_int_data.bytes_remaining);
+                    memcpy((uint8_t *) &(radio_int_data.rx_buf[radio_int_data.byte_index]), rx_aux_buffer, radio_int_data.bytes_remaining);
+                    radio_int_data.byte_index += radio_int_data.bytes_remaining;
+                    radio_int_data.bytes_remaining = 0;
+
+                    radio_int_data.mode = RADIOMODE_NONE;
+                    radio_int_data.packet_receive = 0; // reception is done
+    								
+                    /* get lqi and rssi */
+                    CC_SPIReadStatus(radio_int_data.spi_parms, CC11xx_LQI, &status);
+                    if ( (status&0x80) == 0x80){
+                    	radio_int_data.packet_rx_count++;
+                    }
+                    last_lqi = status&0x7F;
+                    CC_SPIReadStatus(radio_int_data.spi_parms, CC11xx_RSSI, &status);
+                    last_rssi = rssi_dbm(status);
+			    }
                 radio_turn_rx_isr(radio_int_data.spi_parms);
             }
         }    
-    }    
-    else if (radio_int_data.mode == RADIOMODE_TX)
-    {
-        if (int_line)
-        {
+    }else if (radio_int_data.mode == RADIOMODE_TX){
+        if (int_line){
             radio_int_data.packet_send = 1; // Assert packet transmission after sync has been sent
-        }
-        else
-        {
-            if (radio_int_data.packet_send) // packet has been sent
-            {
-                radio_int_data.mode = RADIOMODE_NONE;
-                radio_int_data.packet_send = 0; // De-assert packet transmission after packet has been sent
-                radio_int_data.packet_tx_count++;
-
-                if ((radio_int_data.bytes_remaining))
-                {
-                    radio_turn_idle(radio_int_data.spi_parms);          
+        }else{
+            if (radio_int_data.packet_send){
+                CC_SPIReadStatus(radio_int_data.spi_parms, CC11xxTXBYTES, &status);
+                if (status&0x80 == 0x80){ /* Underflow */
+                    radio_int_data.mode = RADIOMODE_NONE;
+                    radio_int_data.packet_send = 0; // De-assert packet transmission after packet has been sent
+                    radio_turn_idle(radio_int_data.spi_parms);
+                }else{
+                    radio_int_data.mode = RADIOMODE_NONE;
+                    radio_int_data.packet_send = 0; // De-assert packet transmission after packet has been sent
+                    radio_int_data.packet_tx_count++;
+                    if ((radio_int_data.bytes_remaining)){
+                        radio_turn_idle(radio_int_data.spi_parms);          
+                    }
                 }
-                radio_turn_rx_isr(radio_int_data.spi_parms);
             }
-            else
-            {
-                /* Some protection here */
-								radio_turn_idle(radio_int_data.spi_parms);
-								radio_turn_rx_isr(radio_int_data.spi_parms);
-            }
+            radio_turn_rx_isr(radio_int_data.spi_parms);
         }
     }
 }
@@ -115,34 +110,22 @@ void gdo2_isr(void)
     }
     int_line = CC11xx_GDO2(); // Sense interrupt line to determine if it was a raising or falling edge
 
-    if ((radio_int_data.mode == RADIOMODE_RX) && (int_line)) // Filling of Rx FIFO - Read next 59 bytes
-    {
-        if (radio_int_data.packet_receive) // if reception has started
-        {
+    if ((radio_int_data.mode == RADIOMODE_RX) && (int_line)){
+        if (radio_int_data.packet_receive){
             /* if this shit wants to write but rx_buf will overload, just break */
             CC_SPIReadBurstReg(radio_int_data.spi_parms, CC11xx_RXFIFO, rx_aux_buffer, RX_FIFO_UNLOAD);
             /* Check for status byte in each */
             memcpy((uint8_t *) &(radio_int_data.rx_buf[radio_int_data.byte_index]), rx_aux_buffer, RX_FIFO_UNLOAD);
             radio_int_data.byte_index += RX_FIFO_UNLOAD;
-            radio_int_data.bytes_remaining -= RX_FIFO_UNLOAD;            
-        }
-        else
-        {
-            /* Some protection here */
-						radio_turn_idle(radio_int_data.spi_parms);
-						radio_turn_rx_isr(radio_int_data.spi_parms);
+            radio_int_data.bytes_remaining -= RX_FIFO_UNLOAD;    
+            return;        
         }
     }
-    else if ((radio_int_data.mode == RADIOMODE_TX) && (!int_line)) // Depletion of Tx FIFO - Write at most next TX_FIFO_REFILL bytes
-    {
-        if ((radio_int_data.packet_send) && (radio_int_data.bytes_remaining > 0)) // bytes left to send
-        {
-            if (radio_int_data.bytes_remaining < TX_FIFO_REFILL)
-            {
+    if ((radio_int_data.mode == RADIOMODE_TX) && (!int_line)){
+        if ((radio_int_data.packet_send) && (radio_int_data.bytes_remaining > 0)){
+            if (radio_int_data.bytes_remaining < TX_FIFO_REFILL){
                 bytes_to_send = radio_int_data.bytes_remaining;
-            }
-            else
-            {
+            }else{
                 bytes_to_send = TX_FIFO_REFILL;
             }
             CC_SPIWriteBurstReg(radio_int_data.spi_parms, CC11xx_TXFIFO, (uint8_t *) &(radio_int_data.tx_buf[radio_int_data.byte_index]), bytes_to_send);
@@ -150,6 +133,7 @@ void gdo2_isr(void)
             /* Check for status byte in each */
             radio_int_data.byte_index += bytes_to_send;
             radio_int_data.bytes_remaining -= bytes_to_send;
+            return;
         }
     }
 }
